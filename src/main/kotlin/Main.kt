@@ -2,9 +2,7 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
-import java.sql.Time
-import java.time.LocalDateTime
-import java.util.Random
+import java.util.SortedMap
 import javax.sound.sampled.AudioFileFormat
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
@@ -15,6 +13,8 @@ import kotlin.Int
 import kotlin.Long
 import kotlin.String
 import kotlin.Throws
+import kotlin.math.PI
+import kotlin.math.sin
 
 /**
  *
@@ -28,39 +28,57 @@ class SampleSquare(var freq: Double, var seconds: Double) : InputStream() {
     var channels = 1
     var list: ArrayList<Byte>
     var index = 0.0
-    var period: Double
+    var ellapsedFrame = 0
+
+    var period: Double //　周期(フレーム)
+    val changeKeyMapBySec = mutableMapOf(0.1 to 440.0, 0.2 to 220.000, 0.3 to 110.000, 0.4 to 70.0, 0.5 to 60.0 )
+    val changeKeyMapByFrameSorted :SortedMap<Int, Double>
+    val changeKeyMapFrames : List<Int>
     var volume: Double
-    var i = 0
+    var changeKeyMapIndex = 0;
     init {
         list = ArrayList()
         period = sample_rate / freq
         volume = Math.pow(2.0, (sample_size_byte * 8 - 1).toDouble()) - 1
+        var i = 0
+        val sortedKeys = changeKeyMapBySec.keys.sorted()
+        val changeMapFrame = mutableMapOf<Int, Double>()
+
+        for (kv in changeKeyMapBySec){
+            val sec = sortedKeys[i]
+            changeMapFrame[(sec * sample_rate).toInt()] = changeKeyMapBySec[sec]!!
+            i++
+        }
+        changeKeyMapByFrameSorted = changeMapFrame.toSortedMap()
+        changeKeyMapFrames = changeKeyMapByFrameSorted.keys.toList()
     }
 
     @Throws(IOException::class)
     override fun read(): Int {
-//        val result = when ((i / 220) % 2){
-//            0 -> 255
-//            else -> -255
-//        }
-//        i++
-//        return result
+        run {
+            if (changeKeyMapIndex <= changeKeyMapFrames.lastIndex){
+                val nextChangeFrame = changeKeyMapFrames[changeKeyMapIndex]
 
-        if (list.isEmpty()) {
-            val value: Long
-            value = if (index / period < 0.5) {
-                volume.toLong()
-            } else {
-                -volume.toLong()
+                if (ellapsedFrame == nextChangeFrame) {
+                    freq = changeKeyMapByFrameSorted[nextChangeFrame]!!
+                    period = sample_rate / freq
+                    changeKeyMapIndex++
+                }
             }
-            index++
-            index %= period
+        }
+        if (list.isEmpty()) {
+            val phase = index / period
+            val factor = sin(2 * phase * PI)
+            val value: Long = (volume * factor).toLong()
             val buffer = ByteBuffer.allocate(8)
             buffer.putLong(value)
             val array = buffer.array()
             for (i in 8 - sample_size_byte..7) {
                 list.add(array[i])
             }
+            ellapsedFrame++
+            index++
+            index %= period
         }
         val current = list.removeAt(0)
         return current.toUByte().toInt()
@@ -75,7 +93,7 @@ class SampleSquare(var freq: Double, var seconds: Double) : InputStream() {
 
 }
 fun main(arg: Array<String>) {
-    val ss = SampleSquare(440.0, 3.0)
+    val ss = SampleSquare(880.0, 3.0)
     val file = File("result/square_440_${System.currentTimeMillis()}.wav")
     file.createNewFile()
     AudioSystem.write(
